@@ -21,112 +21,101 @@ from skimage.metrics import mean_squared_error as compare_mse
 # 启用CuDNN（CUDA Deep Neural Network library）加速。
 cudnn.enabled = True
 
-def get_arguments():
-
-	parser = argparse.ArgumentParser(description="Unet")
-
-	parser.add_argument("--upmode", type=str, default='nn', help="the mode chosen to implement upsample.") # 'bilinear', 'maxpool', 'nn'. 'indexnet-m2o', ...
-	parser.add_argument("--description", type=str, default='./0130/', help="description.")
-	parser.add_argument("--evaluate", type=str, default='experiments/0130/nn/model_best.pth.tar', help="path of model.")
-
-	return parser.parse_args(args=[])
-
-def space_to_depth(x, block_size):
-	n, c, h, w = x.size()
-	unfolded_x = F.unfold(x, block_size, stride=block_size)
-	return unfolded_x.view(n, c*block_size**2, h//block_size, w//block_size)
-
-
-class double_conv2d_bn(nn.Module):
-    def __init__(self,in_channels,out_channels,kernel_size=3,strides=1,padding=1):
-        super(double_conv2d_bn,self).__init__()
-        self.conv1 = nn.Conv2d(in_channels,out_channels,
-                               kernel_size=kernel_size,
-                              stride = strides,padding=padding,bias=True)
-        self.conv2 = nn.Conv2d(out_channels,out_channels,
-                              kernel_size = kernel_size,
-                              stride = strides,padding=padding,bias=True)
+class encoder(nn.Module):
+    def __init__(self,in_channels,out_channels):
+        super(encoder,self).__init__()
+        
+        self.conv1 = nn.Conv2d(in_channels,out_channels,kernel_size=3,stride = 1,padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = nn.Conv2d(out_channels,out_channels,kernel_size = 3,stride = 1,padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
     
     def forward(self,x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = F.relu(self.bn2(self.conv2(out)))
-        return out
+        x=self.conv1(x)
+        x=self.bn1(x)
+        x=F.relu(x)
+        x=self.conv2(x)
+        x=self.bn2(x)
+        x=F.relu(x)
+        return x
     
-class deconv2d_bn(nn.Module):
-    def __init__(self,in_channels,out_channels,kernel_size=2,strides=2):
-        super(deconv2d_bn,self).__init__()
-        self.conv1 = nn.ConvTranspose2d(in_channels,out_channels,
-                                        kernel_size = kernel_size,
-                                       stride = strides,bias=True)
+class decoder(nn.Module):
+    def __init__(self,in_channels,out_channels):
+        super(decoder,self).__init__()
+        
+        self.conv1 = nn.ConvTranspose2d(in_channels,out_channels,kernel_size =2,stride =2)
         self.bn1 = nn.BatchNorm2d(out_channels)
         
     def forward(self,x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        return out
+        x=self.conv1(x)
+        x=self.bn1(x)
+        x=F.relu(x)
+        return x
     
 class Unet(nn.Module):
     def __init__(self):
         super(Unet,self).__init__()
-        self.layer1_conv = double_conv2d_bn(1,8)
-        self.layer2_conv = double_conv2d_bn(8,16)
-        self.layer3_conv = double_conv2d_bn(16,32)
-        self.layer4_conv = double_conv2d_bn(32,64)
-        self.layer5_conv = double_conv2d_bn(64,128)
-        self.layer6_conv = double_conv2d_bn(128,64)
-        self.layer7_conv = double_conv2d_bn(64,32)
-        self.layer8_conv = double_conv2d_bn(32,16)
-        self.layer9_conv = double_conv2d_bn(16,8)
-        self.layer10_conv = nn.Conv2d(8,1,kernel_size=3,
-                                     stride=1,padding=1,bias=True)
+        self.convlayer1 = encoder(1,8)
+        self.convlayer2 = encoder(8,16)
+        self.convlayer3 = encoder(16,32)
+        self.convlayer4 = encoder(32,64)
+        self.convlayer5 = encoder(64,128)
         
-        self.deconv1 = deconv2d_bn(128,64)
-        self.deconv2 = deconv2d_bn(64,32)
-        self.deconv3 = deconv2d_bn(32,16)
-        self.deconv4 = deconv2d_bn(16,8)
+        self.convlayer6 = encoder(128,64)
+        self.convlayer7 = encoder(64,32)
+        self.convlayer8 = encoder(32,16)
+        self.convlayer9 = encoder(16,8)
+        self.convlayer10 = nn.Conv2d(8,1,kernel_size=3,stride=1,padding=1)
+        
+        self.deconv1 = decoder(128,64)
+        self.deconv2 = decoder(64,32)
+        self.deconv3 = decoder(32,16)
+        self.deconv4 = decoder(16,8)
         
         self.sigmoid = nn.Sigmoid()
         
     def forward(self,x):
-        conv1 = self.layer1_conv(x)
-        pool1 = F.max_pool2d(conv1,2)
+        c1 = self.convlayer1(x)
+        p1 = F.max_pool2d(c1,2)
         
-        conv2 = self.layer2_conv(pool1)
-        pool2 = F.max_pool2d(conv2,2)
+        c2 = self.convlayer2(p1)
+        p2 = F.max_pool2d(c2,2)
         
-        conv3 = self.layer3_conv(pool2)
-        pool3 = F.max_pool2d(conv3,2)
+        c3 = self.convlayer3(p2)
+        p3 = F.max_pool2d(c3,2)
         
-        conv4 = self.layer4_conv(pool3)
-        pool4 = F.max_pool2d(conv4,2)
+        c4 = self.convlayer4(p3)
+        p4 = F.max_pool2d(c4,2)
         
-        conv5 = self.layer5_conv(pool4)
+        c5 = self.convlayer5(p4)
         
-        convt1 = self.deconv1(conv5)
-        concat1 = torch.cat([convt1,conv4],dim=1)
-        conv6 = self.layer6_conv(concat1)
+        ct1 = self.deconv1(c5)
+        concat1 = torch.cat([ct1,c4],dim=1)
+        c6 = self.convlayer6(concat1)
         
-        convt2 = self.deconv2(conv6)
-        concat2 = torch.cat([convt2,conv3],dim=1)
-        conv7 = self.layer7_conv(concat2)
+        ct2 = self.deconv2(c6)
+        concat2 = torch.cat([ct2,c3],dim=1)
+        c7 = self.convlayer7(concat2)
         
-        convt3 = self.deconv3(conv7)
-        concat3 = torch.cat([convt3,conv2],dim=1)
-        conv8 = self.layer8_conv(concat3)
+        ct3 = self.deconv3(c7)
+        concat3 = torch.cat([ct3,c2],dim=1)
+        c8 = self.convlayer8(concat3)
         
-        convt4 = self.deconv4(conv8)
-        concat4 = torch.cat([convt4,conv1],dim=1)
-        conv9 = self.layer9_conv(concat4)
-        outp = self.layer10_conv(conv9)
-        outp = self.sigmoid(outp)
-        return outp
+        ct4 = self.deconv4(c8)
+        concat4 = torch.cat([ct4,c1],dim=1)
+        c9 = self.convlayer9(concat4)
+        
+        output = self.convlayer10(c9)
+        output = self.sigmoid(output)
+        return output
 
 #train model
 def train(model, train_loader, optimizer, criterion):
 	running_loss = 0	# 用于记录每个epoch的累计损失
 	model.train()		# 将模型设置为训练模式
 	cudnn.benchmark = True
+	# 迭代训练数据加载器中的批次数据
 	for i, (data, target) in enumerate(train_loader):
 		data = data.cuda()
 		optimizer.zero_grad()	# 将优化器的梯度缓存清零
@@ -198,6 +187,21 @@ def val(epoch, model, val_loader, criterion, save_image_dir):
 def save_checkpoint(state, snapshot_dir, filename='.pth.tar'):
 	torch.save(state, '{}/{}'.format(snapshot_dir, filename))
 
+# 添加了三个命令行参数的定义：
+# 1--upmode 用于指定实现上采样的模式。默认值是'nn'，表示使用最近邻插值法进行上采样
+# 2--description 用于指定描述信息的路径 表示描述信息的路径为当前目录下的'0130'文件夹。
+# 3--evaluate 用于指定模型的路径 表示模型路径为'experiments/0130/nn/model_best.pth.tar'
+# 解析命令行参数，并返回一个包含解析结果的命名空间对象。
+def get_arguments():
+
+	parser = argparse.ArgumentParser(description="Unet")
+
+	parser.add_argument("--upmode", type=str, default='nn', help="the mode chosen to implement upsample.") # 'bilinear', 'maxpool', 'nn'. 'indexnet-m2o', ...
+	parser.add_argument("--description", type=str, default='./0130/', help="description.")
+	parser.add_argument("--evaluate", type=str, default='experiments/0130/nn/model_best.pth.tar', help="path of model.")
+
+	return parser.parse_args(args=[])    
+    
 def main():
 	batchsize = 100
 	test_batchsize = 80
@@ -286,6 +290,7 @@ def main():
 		}
 		# save model
 		save_checkpoint(state, trained_model_dir, filename='model_ckpt.pth.tar')
+		# 如果当前轮数的PSNR指标比之前的轮数都要好,保存最佳模型
 		if len(net.measure['psnr']) > 1 and net.measure['psnr'][-1] >= max(net.measure['psnr'][:-1]):
 			save_checkpoint(state, trained_model_dir, filename='model_best.pth.tar')
 
@@ -298,3 +303,4 @@ def main():
 
 if __name__ == "__main__":
 	main()
+
