@@ -195,6 +195,7 @@ def main():
 	train_info_record = 'unet/index.txt'
     #指定结果图像保存的目录
 	save_image_dir = 'unet/results/'
+	model_path = 'unet/model_best.pth.tar'
 
 	if not os.path.exists(trained_model_dir):
 		os.makedirs(trained_model_dir)
@@ -221,8 +222,8 @@ def main():
 		'mae': []
 	}
 
-	if os.path.isfile('unet/model_best.pth.tar'):
-		checkpoint = torch.load('unet/model_best.pth.tar')
+	if os.path.isfile(model_path):
+		checkpoint = torch.load(model_path)
 		net.load_state_dict(checkpoint['state_dict'])	# 将加载的模型参数加载到网络模型net中。
 		epoch = checkpoint['epoch']
 		val(epoch, net, testloader, criterion, save_image_dir)
